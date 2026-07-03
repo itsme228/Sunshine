@@ -784,6 +784,7 @@ namespace config {
     47989,  // Base port number
     "ipv4",  // Address family
     {},  // Bind address
+    {},  // Web bind address (admin UI override)
     platf::appdata().string() + "/sunshine.log",  // log file
     false,  // notify_pre_releases
     true,  // system_tray
