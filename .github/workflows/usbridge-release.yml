@@ -157,7 +157,8 @@ jobs:
             libx11-dev libxrandr-dev libxfixes-dev libxtst-dev \
             libxcb-shm0-dev libxcb-xfixes0-dev libxcb1-dev \
             libdrm-dev libcap-dev libudev-dev libwayland-dev \
-            libminiupnpc-dev libva-dev
+            libminiupnpc-dev libva-dev \
+            libnotify-dev
 
       - name: Configure
         run: |
