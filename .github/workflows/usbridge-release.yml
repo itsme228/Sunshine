@@ -158,7 +158,8 @@ jobs:
             libxcb-shm0-dev libxcb-xfixes0-dev libxcb1-dev \
             libdrm-dev libcap-dev libudev-dev libwayland-dev \
             libminiupnpc-dev libva-dev \
-            libnotify-dev
+            libnotify-dev \
+            qtbase5-dev libqt5svg5-dev
 
       - name: Configure
         run: |
