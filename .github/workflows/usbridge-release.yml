@@ -1,0 +1,176 @@
+---
+name: usbridge Release
+
+on:
+  push:
+    tags:
+      - 'v*.usbridge'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v2026.703.usbridge)'
+        required: false
+
+jobs:
+  build-macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+            artifact: Sunshine-macOS-arm64.dmg
+          - arch: x86_64
+            runner: macos-13
+            artifact: Sunshine-macOS-x86_64.dmg
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew install --quiet \
+            cmake \
+            node \
+            pkgconf \
+            icu4c@78 \
+            miniupnpc \
+            openssl@3 \
+            opus
+
+      - name: Configure
+        run: |
+          cmake \
+            -B build \
+            -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DICU_ROOT="$(brew --prefix icu4c@78)" \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DOpus_ROOT_DIR="$(brew --prefix opus)" \
+            -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
+            -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
+            -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
+
+      - name: Build
+        run: cmake --build build -j $(sysctl -n hw.ncpu)
+
+      - name: Package DMG
+        run: |
+          cd build
+          cpack -G DragNDrop --config CPackConfig.cmake
+          mkdir -p ../artifacts
+          cp cpack_artifacts/Sunshine.dmg "../artifacts/${{ matrix.artifact }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.artifact }}
+
+  build-windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            wget
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-miniupnpc
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-curl-winssl
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-onevpl
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          NODE_PATH="$(cygpath -m "$(which node | xargs dirname)")"
+          cmake \
+            -B build \
+            -S . \
+            -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNODEJS_PATH="${NODE_PATH}" \
+            -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
+            -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
+            -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
+
+      - name: Build
+        shell: msys2 {0}
+        run: cmake --build build -j $(nproc)
+
+      - name: Package ZIP
+        shell: msys2 {0}
+        run: |
+          cd build
+          cpack -G ZIP --config CPackConfig.cmake
+          mkdir -p ../artifacts
+          cp cpack_artifacts/Sunshine.zip ../artifacts/Sunshine-Windows-AMD64-portable.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sunshine-Windows-AMD64-portable.zip
+          path: artifacts/Sunshine-Windows-AMD64-portable.zip
+
+  release:
+    name: Create Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [[ -z "$TAG" ]]; then
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Sunshine ${{ steps.tag.outputs.tag }} (usbridge fork)"
+          body: |
+            Sunshine fork by usbridge with `web_bind_address` config option.
+
+            This adds a separate bind address for the web admin UI, independent
+            of `bind_address` (which controls streaming ports). Set
+            `web_bind_address = 127.0.0.1` in sunshine.conf to restrict the
+            admin UI to localhost while streaming ports bind to your VPN interface.
+          files: |
+            artifacts/Sunshine-macOS-arm64.dmg
+            artifacts/Sunshine-macOS-x86_64.dmg
+            artifacts/Sunshine-Windows-AMD64-portable.zip
+          fail_on_unmatched_files: false
