@@ -151,14 +151,17 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          sudo add-apt-repository universe -y
+          sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config nodejs npm \
             libssl-dev libevdev-dev libopus-dev libpulse-dev \
+            libcurl4-openssl-dev libgbm-dev libnuma-dev \
+            libpipewire-0.3-dev libsystemd-dev libnotify-dev \
             libx11-dev libxrandr-dev libxfixes-dev libxtst-dev \
             libxcb-shm0-dev libxcb-xfixes0-dev libxcb1-dev \
             libdrm-dev libcap-dev libudev-dev libwayland-dev \
-            libminiupnpc-dev libva-dev \
-            libnotify-dev \
+            libminiupnpc-dev libva-dev libvulkan-dev \
             qtbase5-dev libqt5svg5-dev
 
       - name: Configure
