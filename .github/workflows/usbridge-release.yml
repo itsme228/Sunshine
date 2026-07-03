@@ -22,9 +22,6 @@ jobs:
           - arch: arm64
             runner: macos-14
             artifact: Sunshine-macOS-arm64.dmg
-          - arch: x86_64
-            runner: macos-13
-            artifact: Sunshine-macOS-x86_64.dmg
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -168,6 +165,5 @@ jobs:
             interface via `bind_address`.
           files: |
             artifacts/Sunshine-macOS-arm64.dmg
-            artifacts/Sunshine-macOS-x86_64.dmg
             artifacts/Sunshine-Windows-AMD64-portable.zip
           fail_on_unmatched_files: false
