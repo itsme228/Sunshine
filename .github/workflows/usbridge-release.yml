@@ -122,13 +122,13 @@ jobs:
           cd build
           cpack -G ZIP --config CPackConfig.cmake
           mkdir -p ../artifacts
-          cp cpack_artifacts/Sunshine.zip ../artifacts/Sunshine-Windows-AMD64-portable.zip
+          cp cpack_artifacts/Sunshine.zip ../artifacts/Sunshine-Windows-x86_64-portable.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Sunshine-Windows-AMD64-portable.zip
-          path: artifacts/Sunshine-Windows-AMD64-portable.zip
+          name: Sunshine-Windows-x86_64-portable.zip
+          path: artifacts/Sunshine-Windows-x86_64-portable.zip
 
   build-linux:
     name: Linux x86_64
@@ -149,27 +149,40 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y cmake
 
-      - name: Build AppImage
+      - name: Install build dependencies
         run: |
-          chmod +x scripts/linux_build.sh
-          ./scripts/linux_build.sh \
-            --publisher-name='usbridge_agent' \
-            --publisher-website='https://github.com/itsme228/usbridge_agent' \
-            --publisher-issue-url='https://github.com/itsme228/usbridge_agent/issues' \
-            --skip-cuda \
-            --skip-cleanup \
-            --appimage-build
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config nodejs npm \
+            libssl-dev libevdev-dev libopus-dev libpulse-dev \
+            libx11-dev libxrandr-dev libxfixes-dev libxtst-dev \
+            libxcb-shm0-dev libxcb-xfixes0-dev libxcb1-dev \
+            libdrm-dev libcap-dev libudev-dev libwayland-dev \
+            libminiupnpc-dev libva-dev
 
-      - name: Stage AppImage artifact
+      - name: Configure
         run: |
-          appimage=$(find . -name '*.AppImage' | head -1)
-          cp "$appimage" Sunshine-Linux-x86_64.AppImage
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_DOCS=OFF \
+            -DSUNSHINE_BUILD_APPIMAGE=ON \
+            -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
+            -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
+            -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
+
+      - name: Build
+        run: cmake --build build -j $(nproc)
+
+      - name: Install to staging and package tarball
+        run: |
+          DESTDIR=staging cmake --install build --prefix /usr
+          mkdir -p artifacts
+          tar -czf artifacts/Sunshine-Linux-x86_64.tar.gz -C staging .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Sunshine-Linux-x86_64.AppImage
-          path: Sunshine-Linux-x86_64.AppImage
+          name: Sunshine-Linux-x86_64.tar.gz
+          path: artifacts/Sunshine-Linux-x86_64.tar.gz
 
   release:
     name: Create Release
@@ -206,6 +219,6 @@ jobs:
             interface via `bind_address`.
           files: |
             artifacts/Sunshine-macOS-arm64.dmg
-            artifacts/Sunshine-Windows-AMD64-portable.zip
-            artifacts/Sunshine-Linux-x86_64.AppImage
+            artifacts/Sunshine-Windows-x86_64-portable.zip
+            artifacts/Sunshine-Linux-x86_64.tar.gz
           fail_on_unmatched_files: false
