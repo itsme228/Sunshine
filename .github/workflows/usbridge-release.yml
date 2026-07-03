@@ -48,6 +48,7 @@ jobs:
             -B build \
             -S . \
             -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_DOCS=OFF \
             -DICU_ROOT="$(brew --prefix icu4c@78)" \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
             -DOpus_ROOT_DIR="$(brew --prefix opus)" \
@@ -86,7 +87,6 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            wget
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-toolchain
@@ -97,22 +97,17 @@ jobs:
             mingw-w64-ucrt-x86_64-nlohmann-json
             mingw-w64-ucrt-x86_64-onevpl
             mingw-w64-ucrt-x86_64-pkgconf
-
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
-        with:
-          node-version: 'lts/*'
+            mingw-w64-ucrt-x86_64-nodejs
 
       - name: Configure
         shell: msys2 {0}
         run: |
-          NODE_PATH="$(cygpath -m "$(which node | xargs dirname)")"
           cmake \
             -B build \
             -S . \
             -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DNODEJS_PATH="${NODE_PATH}" \
+            -DBUILD_DOCS=OFF \
             -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
             -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
             -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
@@ -165,10 +160,9 @@ jobs:
           body: |
             Sunshine fork by usbridge with `web_bind_address` config option.
 
-            This adds a separate bind address for the web admin UI, independent
-            of `bind_address` (which controls streaming ports). Set
-            `web_bind_address = 127.0.0.1` in sunshine.conf to restrict the
-            admin UI to localhost while streaming ports bind to your VPN interface.
+            Set `web_bind_address = 127.0.0.1` in sunshine.conf to restrict the
+            admin HTTPS UI to localhost while streaming ports bind to your VPN
+            interface via `bind_address`.
           files: |
             artifacts/Sunshine-macOS-arm64.dmg
             artifacts/Sunshine-macOS-x86_64.dmg
