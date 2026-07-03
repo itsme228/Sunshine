@@ -1821,12 +1821,17 @@ namespace confighttp {
     server.resource["^/assets\\/.+$"]["GET"] = getAsset;
 
     server.config.reuse_address = true;
-    server.config.address = net::get_bind_address(address_family);
+    // web_bind_address overrides bind_address for the admin UI only (e.g. "127.0.0.1" to keep it localhost-only)
+    server.config.address = config::sunshine.web_bind_address.empty()
+      ? net::get_bind_address(address_family)
+      : config::sunshine.web_bind_address;
     server.config.port = port_https;
 
     // Store bind address for logging, use "localhost" as fallback for wildcard addresses
     const auto bind_addr = server.config.address;
-    const auto display_addr = config::sunshine.bind_address.empty() ? "localhost"sv : std::string_view {bind_addr};
+    const auto display_addr = (config::sunshine.web_bind_address.empty() && config::sunshine.bind_address.empty())
+      ? "localhost"sv
+      : std::string_view {bind_addr};
 
     auto accept_and_run = [&](auto *server) {
       try {
