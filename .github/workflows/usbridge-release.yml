@@ -130,9 +130,50 @@ jobs:
           name: Sunshine-Windows-AMD64-portable.zip
           path: artifacts/Sunshine-Windows-AMD64-portable.zip
 
+  build-linux:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install cmake 4.x from Kitware
+        run: |
+          wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
+          sudo apt-add-repository -y \
+            "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main"
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake
+
+      - name: Build AppImage
+        run: |
+          chmod +x scripts/linux_build.sh
+          ./scripts/linux_build.sh \
+            --publisher-name='usbridge_agent' \
+            --publisher-website='https://github.com/itsme228/usbridge_agent' \
+            --publisher-issue-url='https://github.com/itsme228/usbridge_agent/issues' \
+            --skip-cuda \
+            --skip-cleanup \
+            --appimage-build
+
+      - name: Stage AppImage artifact
+        run: |
+          appimage=$(find . -name '*.AppImage' | head -1)
+          cp "$appimage" Sunshine-Linux-x86_64.AppImage
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sunshine-Linux-x86_64.AppImage
+          path: Sunshine-Linux-x86_64.AppImage
+
   release:
     name: Create Release
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -166,4 +207,5 @@ jobs:
           files: |
             artifacts/Sunshine-macOS-arm64.dmg
             artifacts/Sunshine-Windows-AMD64-portable.zip
+            artifacts/Sunshine-Linux-x86_64.AppImage
           fail_on_unmatched_files: false
