@@ -49,6 +49,7 @@ jobs:
             -DICU_ROOT="$(brew --prefix icu4c@78)" \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
             -DOpus_ROOT_DIR="$(brew --prefix opus)" \
+            -DSUNSHINE_ENABLE_TRAY=OFF \
             -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
             -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
             -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
@@ -108,6 +109,7 @@ jobs:
             -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_DOCS=OFF \
+            -DSUNSHINE_ENABLE_TRAY=OFF \
             -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
             -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
             -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
@@ -162,7 +164,7 @@ jobs:
             libxcb-shm0-dev libxcb-xfixes0-dev libxcb1-dev \
             libdrm-dev libcap-dev libudev-dev libwayland-dev \
             libminiupnpc-dev libva-dev libvulkan-dev \
-            qtbase5-dev libqt5svg5-dev
+            qtbase5-dev libqt5svg5-dev glslang-tools
 
       - name: Configure
         run: |
@@ -171,6 +173,7 @@ jobs:
             -DBUILD_DOCS=OFF \
             -DSUNSHINE_BUILD_APPIMAGE=ON \
             -DCUDA_FAIL_ON_MISSING=OFF \
+            -DSUNSHINE_ENABLE_TRAY=OFF \
             -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
             -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
             -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/itsme228/usbridge_agent/issues"
