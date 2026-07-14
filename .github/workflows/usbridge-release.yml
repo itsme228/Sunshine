@@ -28,6 +28,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Select Xcode 16.2
+        run: sudo xcode-select --switch /Applications/Xcode_16.2.app
+
       - name: Install dependencies
         run: |
           brew install --quiet \
@@ -154,9 +157,10 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo add-apt-repository universe -y
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config nodejs npm \
+            build-essential gcc-14 g++-14 pkg-config nodejs npm \
             libssl-dev libevdev-dev libopus-dev libpulse-dev \
             libcurl4-openssl-dev libgbm-dev libnuma-dev \
             libpipewire-0.3-dev libsystemd-dev libnotify-dev \
@@ -167,6 +171,9 @@ jobs:
             qtbase5-dev libqt5svg5-dev glslang-tools
 
       - name: Configure
+        env:
+          CC: gcc-14
+          CXX: g++-14
         run: |
           cmake -B build -S . \
             -DCMAKE_BUILD_TYPE=Release \
