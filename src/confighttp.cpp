@@ -1850,7 +1850,7 @@ namespace confighttp {
         return;
       }
     };
-    std::thread tcp {accept_and_run, &server};
+    std::jthread tcp {accept_and_run, &server};
 
     // Wait for any event
     shutdown_event->view();
