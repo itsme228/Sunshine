@@ -203,15 +203,13 @@ jobs:
             "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
           chmod +x /tmp/linuxdeploy-x86_64.AppImage
 
-          # `cmake --install` also installs a .desktop file (Icon=sunshine)
-          # under usr/share/applications. We only want linuxdeploy for
-          # dependency bundling, not AppDir root/desktop integration — but it
-          # auto-detects any .desktop file already in the AppDir and tries to
-          # deploy it, which fails since no icon named "sunshine" exists
-          # here. Drop desktop/icon/metainfo dirs first so linuxdeploy has
-          # nothing to auto-integrate and just bundles libraries.
-          rm -rf staging/usr/share/applications staging/usr/share/icons \
-                 staging/usr/share/metainfo staging/usr/share/pixmaps
+          # `cmake --install` installs a .desktop file with Icon=sunshine
+          # (see packaging/linux/AppImage/*.desktop) that linuxdeploy
+          # auto-detects and tries to deploy to the AppDir root — same as
+          # upstream's own AppImage packaging in .github/workflows/ci-linux.yml,
+          # which feeds linuxdeploy the matching icon/desktop file explicitly
+          # instead of letting it guess. Do the same here.
+          desktop_file="$(find staging/usr/share/applications -name '*.desktop' | head -1)"
 
           # GH-hosted runners don't reliably have a working FUSE mount for
           # AppImages to self-mount via; --appimage-extract-and-run makes the
@@ -220,7 +218,9 @@ jobs:
           ARCH=x86_64 /tmp/linuxdeploy-x86_64.AppImage \
             --appimage-extract-and-run \
             --appdir staging \
-            --executable staging/usr/bin/sunshine
+            --executable staging/usr/bin/sunshine \
+            --icon-file sunshine.png \
+            --desktop-file "$desktop_file"
 
           missing_libs="$(ldd staging/usr/bin/sunshine 2>/dev/null | awk '/not found/ {print $1}')"
           if [[ -n "$missing_libs" ]]; then
