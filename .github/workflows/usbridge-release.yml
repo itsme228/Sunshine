@@ -191,6 +191,28 @@ jobs:
       - name: Install to staging and package tarball
         run: |
           DESTDIR=staging cmake --install build --prefix /usr
+
+          # Bundle every shared library the sunshine binary needs into
+          # staging/usr/lib and patch its RPATH to $ORIGIN/../lib, so the
+          # tarball is fully self-contained. usbridge_agent's Linux AppImage
+          # build copies this staging tree as-is and relies on usr/lib
+          # already carrying Sunshine's runtime deps (e.g.
+          # libminiupnpc.so.17) — the host AppImage users run on has no
+          # guarantee of matching system packages.
+          curl -fL --progress-bar -o /tmp/linuxdeploy-x86_64.AppImage \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          chmod +x /tmp/linuxdeploy-x86_64.AppImage
+
+          ARCH=x86_64 /tmp/linuxdeploy-x86_64.AppImage \
+            --appdir staging \
+            --executable staging/usr/bin/sunshine
+
+          missing_libs="$(ldd staging/usr/bin/sunshine 2>/dev/null | awk '/not found/ {print $1}')"
+          if [[ -n "$missing_libs" ]]; then
+            echo "::error::sunshine binary still missing shared libraries after bundling: $missing_libs"
+            exit 1
+          fi
+
           mkdir -p artifacts
           tar -czf artifacts/Sunshine-Linux-x86_64.tar.gz -C staging .
 
