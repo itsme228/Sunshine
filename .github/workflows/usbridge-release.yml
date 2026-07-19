@@ -215,12 +215,27 @@ jobs:
           # AppImages to self-mount via; --appimage-extract-and-run makes the
           # AppImage runtime extract itself to a temp dir and exec from there
           # instead, sidestepping FUSE entirely.
+          #
+          # libva/libva-drm must NOT be bundled. linuxdeploy's built-in
+          # excludelist already knows to leave libGL/libEGL/libdrm etc. on
+          # the host because they have to match the host's own GPU driver
+          # stack -- but it predates VAAPI being common and doesn't cover
+          # libva. Bundling it anyway pulls in Ubuntu 22.04's ancient libva
+          # (VA-API interface ~1.14), which can't resolve the
+          # __vaDriverInit_1_2x symbol newer host VAAPI drivers export
+          # (e.g. current intel-media-va-driver), so hardware encoding
+          # silently falls back to software on every up-to-date host. libva
+          # is loaded at runtime and is always present alongside a
+          # functioning VAAPI stack, so excluding it just means we rely on
+          # the host's copy, same as we already do for libGL/libdrm.
           ARCH=x86_64 /tmp/linuxdeploy-x86_64.AppImage \
             --appimage-extract-and-run \
             --appdir staging \
             --executable staging/usr/bin/sunshine \
             --icon-file sunshine.png \
-            --desktop-file "$desktop_file"
+            --desktop-file "$desktop_file" \
+            --exclude-library="libva.so*" \
+            --exclude-library="libva-drm.so*"
 
           missing_libs="$(ldd staging/usr/bin/sunshine 2>/dev/null | awk '/not found/ {print $1}')"
           if [[ -n "$missing_libs" ]]; then
