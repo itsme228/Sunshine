@@ -200,6 +200,18 @@ namespace net {
     // Maximum of 128 clients, which should be enough for anyone
     auto host = host_t {enet_host_create(af == IPV4 ? AF_INET : AF_INET6, &addr, 128, 0, 0, 0)};
 
+    // enet_host_create() returns nullptr on failure (e.g. the port is still held by a
+    // socket from a just-torn-down session, or the process has hit its fd/ephemeral-port
+    // limit after many rapid reconnects). Callers such as control_server_t::bind() already
+    // check the returned host_t for truthiness and report a clean bind failure -- but only
+    // if we don't dereference the null ENetHost* first. Without this check, host->socket
+    // below is a null pointer dereference (SIGSEGV) that takes down the whole process
+    // instead of just failing this one connection attempt.
+    if (!host) {
+      BOOST_LOG(error) << "enet_host_create() failed for port "sv << port << " -- the port may still be in use by a recently-closed session"sv;
+      return host;
+    }
+
     // Enable opportunistic QoS tagging (automatically disables if the network appears to drop tagged packets)
     enet_socket_set_option(host->socket, ENET_SOCKOPT_QOS, 1);
 
