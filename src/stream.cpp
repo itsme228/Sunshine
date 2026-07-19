@@ -1165,11 +1165,17 @@ namespace stream {
       auto &cipher = session->control.cipher;
       auto &iv = session->control.legacy_input_enc_iv;
       if (cipher.decrypt(tagged_cipher, plaintext, &iv)) {
-        // something went wrong :(
-
-        BOOST_LOG(error) << "Failed to verify tag"sv;
-
-        session::stop(*session);
+        // A tag failure here almost always means this is a stray/reordered
+        // UDP packet from a *previous* session's control stream, encrypted
+        // with that session's key, arriving just after a fast reconnect
+        // (e.g. a client-initiated codec switch) -- not an attack against
+        // this session, which is already authenticated via the paired RTSP
+        // launch flow. Ending the whole session (and, downstream, the video
+        // pipeline that hasn't even started encoding yet) over one
+        // undecryptable control packet is disproportionate: drop it and
+        // keep going, the same way a single lost/corrupt packet on any
+        // other channel wouldn't take down the stream.
+        BOOST_LOG(warning) << "Failed to verify tag on legacy input packet, dropping it"sv;
         return;
       }
 
@@ -1220,11 +1226,16 @@ namespace stream {
 
       std::vector<uint8_t> plaintext;
       if (cipher.decrypt(tagged_cipher, plaintext, &iv)) {
-        // something went wrong :(
-
-        BOOST_LOG(error) << "Failed to verify tag"sv;
-
-        session::stop(*session);
+        // See the identical comment in the IDX_INPUT_DATA handler above --
+        // this fires reliably on a fast client-initiated reconnect (e.g.
+        // switching codec) when a control packet from the just-torn-down
+        // previous session's ENet stream is still in flight and lands here
+        // encrypted with the old session's key. Previously this killed the
+        // brand new session via session::stop() before its video pipeline
+        // had even created an encoder, turning a single stray packet into a
+        // full "video never starts" outage. Drop it and keep the session
+        // alive instead.
+        BOOST_LOG(warning) << "Failed to verify tag on control packet, dropping it"sv;
         return;
       }
 
