@@ -74,6 +74,15 @@ typedef bool (^FrameCallbackBlock)(CMSampleBufferRef);
 - (id)initWithDisplay:(CGDirectDisplayID)displayID frameRate:(int)frameRate;
 
 /**
+ * @brief Initialize AVFoundation capture for a camera device and frame rate.
+ *
+ * @param uniqueID AVCaptureDevice.uniqueID of the camera to capture from.
+ * @param frameRate Frame rate.
+ * @return Initialized AVVideo instance, or nil on failure (device not found, in use, or permission denied).
+ */
+- (id)initWithCameraUniqueID:(NSString *)uniqueID frameRate:(int)frameRate;
+
+/**
  * @brief Set frame width frame height.
  *
  * @param frameWidth Frame width.

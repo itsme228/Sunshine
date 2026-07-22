@@ -43,6 +43,55 @@
   return self;
 }
 
+- (id)initWithCameraUniqueID:(NSString *)uniqueID frameRate:(int)frameRate {
+  self = [super init];
+
+  AVCaptureDevice *device = [AVCaptureDevice deviceWithUniqueID:uniqueID];
+  if (!device) {
+    [self release];
+    return nil;
+  }
+
+  CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription);
+
+  self.displayID = kCGNullDirectDisplay;
+  self.pixelFormat = kCVPixelFormatType_32BGRA;
+  self.frameWidth = (int) dims.width;
+  self.frameHeight = (int) dims.height;
+  self.minFrameDuration = CMTimeMake(1, frameRate);
+  self.session = [[AVCaptureSession alloc] init];
+  self.videoOutputs = [[NSMapTable alloc] init];
+  self.captureCallbacks = [[NSMapTable alloc] init];
+  self.captureSignals = [[NSMapTable alloc] init];
+
+  NSError *error = nil;
+  AVCaptureDeviceInput *deviceInput = [[AVCaptureDeviceInput alloc] initWithDevice:device error:&error];
+  if (!deviceInput) {
+    [self release];
+    return nil;
+  }
+
+  if ([self.session canAddInput:deviceInput]) {
+    [self.session addInput:deviceInput];
+  } else {
+    [deviceInput release];
+    [self release];
+    return nil;
+  }
+
+  // Best-effort: pin the camera's own frame rate for lowest latency instead of
+  // relying solely on the AVCaptureVideoDataOutput min frame duration below.
+  if ([device lockForConfiguration:&error]) {
+    device.activeVideoMinFrameDuration = self.minFrameDuration;
+    device.activeVideoMaxFrameDuration = self.minFrameDuration;
+    [device unlockForConfiguration];
+  }
+
+  [self.session startRunning];
+
+  return self;
+}
+
 - (void)dealloc {
   [self.videoOutputs release];
   [self.captureCallbacks release];

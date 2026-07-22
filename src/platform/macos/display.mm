@@ -32,6 +32,40 @@ namespace platf {
   using namespace std::literals;
 
   namespace {
+    constexpr std::string_view kCameraPrefix = "camera:"sv;
+
+    bool is_camera_name(std::string_view display_name) {
+      return display_name.rfind(kCameraPrefix, 0) == 0;
+    }
+
+    struct camera_info_t {
+      std::string unique_id;  ///< AVCaptureDevice.uniqueID.
+      std::string name;  ///< Human-readable camera name.
+    };
+
+    std::vector<camera_info_t> enumerate_camera_devices() {
+      std::vector<camera_info_t> result;
+
+      NSMutableArray<AVCaptureDeviceType> *deviceTypes = [NSMutableArray arrayWithObject:AVCaptureDeviceTypeBuiltInWideAngleCamera];
+      if (@available(macOS 14.0, *)) {
+        [deviceTypes addObject:AVCaptureDeviceTypeExternal];
+      }
+
+      AVCaptureDeviceDiscoverySession *discovery =
+        [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:deviceTypes
+                                                                mediaType:AVMediaTypeVideo
+                                                                 position:AVCaptureDevicePositionUnspecified];
+
+      for (AVCaptureDevice *device in discovery.devices) {
+        camera_info_t info;
+        info.unique_id = [device.uniqueID UTF8String];
+        info.name = [device.localizedName UTF8String];
+        result.push_back(std::move(info));
+      }
+
+      return result;
+    }
+
     std::optional<CGDirectDisplayID> parse_display_id(std::string_view display_name) {
       if (display_name.empty()) {
         return std::nullopt;
@@ -222,6 +256,33 @@ namespace platf {
 
     auto display = std::make_shared<av_display_t>();
 
+    if (is_camera_name(display_name)) {
+      std::string unique_id {display_name.substr(kCameraPrefix.size())};
+
+      BOOST_LOG(info) << "Configuring selected camera ("sv << unique_id << ") to stream"sv;
+
+      NSString *ns_unique_id = [NSString stringWithUTF8String:unique_id.c_str()];
+      display->av_capture = [[AVVideo alloc] initWithCameraUniqueID:ns_unique_id frameRate:config.framerate];
+
+      if (!display->av_capture) {
+        BOOST_LOG(error) << "Camera setup failed (not found, in use, or permission denied)."sv;
+        return nullptr;
+      }
+
+      display->width = display->av_capture.frameWidth;
+      display->height = display->av_capture.frameHeight;
+      display->env_width = display->width;
+      display->env_height = display->height;
+
+      if (hwdevice_type == platf::mem_type_e::videotoolbox) {
+        const auto pixel_format {videotoolbox_pixel_format(config)};
+        [display->av_capture setFrameWidth:config.width frameHeight:config.height];
+        display->av_capture.pixelFormat = pixel_format;
+      }
+
+      return display;
+    }
+
     BOOST_LOG(debug) << "Waking display for capture selector ["sv << display_name << ']';
     if (!display_device::wake_display(display_name, 1s)) {
       BOOST_LOG(debug) << "Display wake attempt did not expose the requested display ["sv << display_name << ']';
@@ -292,6 +353,10 @@ namespace platf {
       if (!device.m_display_name.empty()) {
         display_names.emplace_back(device.m_display_name);
       }
+    }
+
+    for (const auto &camera : enumerate_camera_devices()) {
+      display_names.emplace_back(std::string(kCameraPrefix) + camera.unique_id);
     }
 
     return display_names;
