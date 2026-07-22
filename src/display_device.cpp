@@ -835,7 +835,13 @@ namespace display_device {
     })};
 
 #ifdef __APPLE__
-    if (mapped_name.empty() && is_unsigned_integer(output_name)) {
+    // "camera:<AVCaptureDevice.uniqueID>" is not a display at all (see
+    // platf::is_camera_name()/kCameraPrefix in platform/macos/display.mm),
+    // so libdisplaydevice's settings_iface.getDisplayName() above can never
+    // resolve it and always returns empty. Same passthrough as the raw
+    // numeric CGDirectDisplayID case just below: hand the original string
+    // back unmangled so platf::display() can dispatch on it.
+    if (mapped_name.empty() && (is_unsigned_integer(output_name) || output_name.starts_with("camera:"))) {
       return output_name;
     }
 #endif

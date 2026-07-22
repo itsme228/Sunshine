@@ -43,8 +43,38 @@ namespace platf {
       std::string name;  ///< Human-readable camera name.
     };
 
+    // Camera access is a separate TCC permission from screen recording, and
+    // unlike screen recording (see platf::init() in misc.mm, which requests
+    // it unconditionally at every Sunshine startup) it's requested lazily,
+    // only once a client actually picks a "camera:" output_name — most
+    // Sunshine users never touch a camera and shouldn't see that prompt.
+    // AVCaptureDeviceDiscoverySession silently returns zero devices when
+    // this process isn't authorized yet, which is otherwise indistinguishable
+    // from "no camera plugged in" — request/await it explicitly so the
+    // caller gets real devices (or a clear denial) instead of an empty list.
+    bool ensure_camera_access() {
+      AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+      if (status == AVAuthorizationStatusNotDetermined) {
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+          dispatch_semaphore_signal(sem);
+        }];
+        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+      }
+      if (status != AVAuthorizationStatusAuthorized) {
+        BOOST_LOG(error) << "No camera permission!"sv;
+        BOOST_LOG(error) << "Please activate it in 'System Settings' -> 'Privacy & Security' -> 'Camera'"sv;
+        return false;
+      }
+      return true;
+    }
+
     std::vector<camera_info_t> enumerate_camera_devices() {
       std::vector<camera_info_t> result;
+      if (!ensure_camera_access()) {
+        return result;
+      }
 
       NSMutableArray<AVCaptureDeviceType> *deviceTypes = [NSMutableArray arrayWithObject:AVCaptureDeviceTypeBuiltInWideAngleCamera];
       if (@available(macOS 14.0, *)) {
@@ -257,6 +287,10 @@ namespace platf {
     auto display = std::make_shared<av_display_t>();
 
     if (is_camera_name(display_name)) {
+      if (!ensure_camera_access()) {
+        return nullptr;
+      }
+
       std::string unique_id {display_name.substr(kCameraPrefix.size())};
 
       BOOST_LOG(info) << "Configuring selected camera ("sv << unique_id << ") to stream"sv;
