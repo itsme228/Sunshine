@@ -81,9 +81,26 @@
 
   // Best-effort: pin the camera's own frame rate for lowest latency instead of
   // relying solely on the AVCaptureVideoDataOutput min frame duration below.
+  // Many cameras (most built-in FaceTime cameras included) only expose a
+  // single fixed-rate range (e.g. 30fps, min == max) for their active
+  // format -- setting a duration outside [minFrameDuration, maxFrameDuration]
+  // is a hard error, not a clamp, and throws NSInvalidArgumentException
+  // straight through Objective-C's exception mechanism (uncaught, since nothing
+  // here is inside a @try), crashing the whole process. Clamp the requested
+  // rate into whatever range the active format actually supports first.
   if ([device lockForConfiguration:&error]) {
-    device.activeVideoMinFrameDuration = self.minFrameDuration;
-    device.activeVideoMaxFrameDuration = self.minFrameDuration;
+    for (AVFrameRateRange *range in device.activeFormat.videoSupportedFrameRateRanges) {
+      CMTime clamped = self.minFrameDuration;
+      if (CMTimeCompare(clamped, range.minFrameDuration) < 0) {
+        clamped = range.minFrameDuration;
+      } else if (CMTimeCompare(clamped, range.maxFrameDuration) > 0) {
+        clamped = range.maxFrameDuration;
+      }
+      device.activeVideoMinFrameDuration = clamped;
+      device.activeVideoMaxFrameDuration = clamped;
+      self.minFrameDuration = clamped;
+      break;
+    }
     [device unlockForConfiguration];
   }
 
