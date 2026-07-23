@@ -96,6 +96,24 @@ namespace platf {
       return result;
     }
 
+    // Cache of already-open camera AVVideo sessions, keyed by
+    // AVCaptureDevice.uniqueID. probe_encoders() (video.cpp) calls
+    // platf::display() once per candidate codec (h264/hevc/av1), tearing down
+    // and reconstructing a brand new AVCaptureSession/AVCaptureDeviceInput
+    // for the *same physical camera* each time. The built-in FaceTime camera
+    // (macOS's own DAL-backed ISP) tolerates this rapid session churn fine,
+    // but many external USB/UVC capture devices are exclusive-access and
+    // don't reliably resume delivering frames when re-claimed in quick
+    // succession -- observed as probe_encoders() looping forever ("Testing
+    // for available encoders...") without ever settling, no explicit error.
+    // Reusing the same running AVCaptureSession across those calls (an extra
+    // retained reference here keeps it alive even as each av_display_t's own
+    // reference is released) avoids the repeated claim/release entirely.
+    NSMutableDictionary<NSString *, AVVideo *> *camera_session_cache() {
+      static NSMutableDictionary<NSString *, AVVideo *> *cache = [[NSMutableDictionary alloc] init];
+      return cache;
+    }
+
     std::optional<CGDirectDisplayID> parse_display_id(std::string_view display_name) {
       if (display_name.empty()) {
         return std::nullopt;
@@ -293,10 +311,32 @@ namespace platf {
 
       std::string unique_id {display_name.substr(kCameraPrefix.size())};
 
-      BOOST_LOG(info) << "Configuring selected camera ("sv << unique_id << ") to stream"sv;
-
       NSString *ns_unique_id = [NSString stringWithUTF8String:unique_id.c_str()];
-      display->av_capture = [[AVVideo alloc] initWithCameraUniqueID:ns_unique_id frameRate:config.framerate];
+      NSMutableDictionary<NSString *, AVVideo *> *cache = camera_session_cache();
+
+      @synchronized(cache) {
+        AVVideo *cached = [cache objectForKey:ns_unique_id];
+        if (cached) {
+          BOOST_LOG(info) << "Reusing already-open camera session ("sv << unique_id << ") to stream"sv;
+          // objectForKey: doesn't transfer ownership -- the dictionary keeps
+          // its own +1. av_display_t::~av_display_t() unconditionally
+          // releases av_capture, so this av_display_t needs its own +1 to
+          // balance that (matching the +1 that initWithCameraUniqueID: below
+          // gives the not-cached branch, which is what normally gets
+          // balanced by that same release).
+          display->av_capture = [cached retain];
+        } else {
+          BOOST_LOG(info) << "Configuring selected camera ("sv << unique_id << ") to stream"sv;
+          display->av_capture = [[AVVideo alloc] initWithCameraUniqueID:ns_unique_id frameRate:config.framerate];
+          if (display->av_capture) {
+            // setObject:forKey: retains its own +1, kept alive across this
+            // av_display_t's lifetime (and released by ~av_display_t()) so
+            // the next probe/reconnect attempt can reuse the same session
+            // instead of re-claiming the physical device from scratch.
+            [cache setObject:display->av_capture forKey:ns_unique_id];
+          }
+        }
+      }
 
       if (!display->av_capture) {
         BOOST_LOG(error) << "Camera setup failed (not found, in use, or permission denied)."sv;
