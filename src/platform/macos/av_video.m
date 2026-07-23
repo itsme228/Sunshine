@@ -2,6 +2,11 @@
  * @file src/platform/macos/av_video.m
  * @brief Definitions for video capture on macOS.
  */
+// standard includes
+#include <limits.h>
+#include <math.h>
+#include <stdlib.h>
+
 // local includes
 #import "av_video.h"
 
@@ -55,6 +60,7 @@
   CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription);
 
   self.displayID = kCGNullDirectDisplay;
+  self.device = device;
   self.pixelFormat = kCVPixelFormatType_32BGRA;
   self.frameWidth = (int) dims.width;
   self.frameHeight = (int) dims.height;
@@ -120,6 +126,77 @@
 - (void)setFrameWidth:(int)frameWidth frameHeight:(int)frameHeight {
   self.frameWidth = frameWidth;
   self.frameHeight = frameHeight;
+}
+
+- (void)selectBestFormatForWidth:(int)width height:(int)height frameRate:(int)frameRate {
+  if (!self.device || width <= 0 || height <= 0) {
+    // Display capture (no self.device) or no explicit request -- leave
+    // whatever activeFormat the device already has alone.
+    return;
+  }
+
+  AVCaptureDeviceFormat *bestFormat = nil;
+  long long bestScore = LLONG_MAX;
+  long long requestedPixels = (long long) width * height;
+
+  for (AVCaptureDeviceFormat *format in self.device.formats) {
+    CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
+    long long formatPixels = (long long) dims.width * dims.height;
+
+    bool hasRate = false;
+    for (AVFrameRateRange *range in format.videoSupportedFrameRateRanges) {
+      if (frameRate >= (int) lround(range.minFrameRate) && frameRate <= (int) lround(range.maxFrameRate)) {
+        hasRate = true;
+        break;
+      }
+    }
+
+    // Prefer the closest pixel count to what was requested (favoring formats
+    // that meet or exceed it, so we don't silently downgrade below what the
+    // client asked for when a bigger option exists); heavily penalize
+    // formats that can't actually hit the requested frame rate, since
+    // upstream already clamps into whatever range the *chosen* format
+    // supports -- better to pick a format that didn't need clamping at all.
+    long long pixelDiff = llabs(formatPixels - requestedPixels);
+    if (formatPixels < requestedPixels) {
+      pixelDiff += requestedPixels;  // de-prioritize undersized formats
+    }
+    long long score = pixelDiff + (hasRate ? 0 : (1LL << 40));
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestFormat = format;
+    }
+  }
+
+  if (!bestFormat || bestFormat == self.device.activeFormat) {
+    return;
+  }
+
+  NSError *error = nil;
+  if ([self.device lockForConfiguration:&error]) {
+    self.device.activeFormat = bestFormat;
+
+    CMTime desired = CMTimeMake(1, frameRate);
+    for (AVFrameRateRange *range in bestFormat.videoSupportedFrameRateRanges) {
+      CMTime clamped = desired;
+      if (CMTimeCompare(clamped, range.minFrameDuration) < 0) {
+        clamped = range.minFrameDuration;
+      } else if (CMTimeCompare(clamped, range.maxFrameDuration) > 0) {
+        clamped = range.maxFrameDuration;
+      }
+      self.device.activeVideoMinFrameDuration = clamped;
+      self.device.activeVideoMaxFrameDuration = clamped;
+      self.minFrameDuration = clamped;
+      break;
+    }
+
+    [self.device unlockForConfiguration];
+
+    CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(bestFormat.formatDescription);
+    self.frameWidth = (int) dims.width;
+    self.frameHeight = (int) dims.height;
+  }
 }
 
 - (dispatch_semaphore_t)capture:(FrameCallbackBlock)frameCallback {

@@ -41,6 +41,12 @@ struct CaptureSession {
  * @brief Frame height property.
  */
 @property (nonatomic, assign) int frameHeight;
+/**
+ * @brief The physical camera device backing this capture session (nil for
+ * display capture) -- kept so selectBestFormatForWidth:height:frameRate: can
+ * change its activeFormat after construction.
+ */
+@property (nonatomic, retain) AVCaptureDevice *device;
 
 /**
  * @brief Objective-C block invoked for each captured sample buffer.
@@ -89,6 +95,17 @@ typedef bool (^FrameCallbackBlock)(CMSampleBufferRef);
  * @param frameHeight Frame height.
  */
 - (void)setFrameWidth:(int)frameWidth frameHeight:(int)frameHeight;
+/**
+ * @brief Switch the camera to whichever of its own AVCaptureDeviceFormats
+ * best matches the requested size/rate, instead of leaving it on whatever
+ * activeFormat macOS defaulted to. No-op for display capture (self.device
+ * is nil there).
+ *
+ * @param width Requested frame width.
+ * @param height Requested frame height.
+ * @param frameRate Requested frame rate.
+ */
+- (void)selectBestFormatForWidth:(int)width height:(int)height frameRate:(int)frameRate;
 /**
  * @brief Run the capture loop for this backend.
  *

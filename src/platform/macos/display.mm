@@ -343,6 +343,15 @@ namespace platf {
         return nullptr;
       }
 
+      // Switch the camera to whichever of its own real AVCaptureDeviceFormats
+      // best matches what the client actually asked for, instead of just
+      // resizing/upscaling whatever format macOS defaulted the device to
+      // (e.g. a 720p default format stretched to a requested 1080p stream,
+      // which looks soft even though the physical sensor may support real
+      // 1080p+ in one of its other formats). No-op the first time a cached
+      // session is reused at the same size it's already running at.
+      [display->av_capture selectBestFormatForWidth:config.width height:config.height frameRate:config.framerate];
+
       display->width = display->av_capture.frameWidth;
       display->height = display->av_capture.frameHeight;
       display->env_width = display->width;
