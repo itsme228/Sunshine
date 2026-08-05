@@ -59,7 +59,6 @@ elseif(UNIX)
     endif()
 endif()
 
-include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/third-party/nv-codec-headers/include")
 file(GLOB NVENC_SOURCES CONFIGURE_DEPENDS "src/nvenc/*.cpp" "src/nvenc/*.h")
 list(APPEND PLATFORM_TARGET_FILES ${NVENC_SOURCES})
 
@@ -151,6 +150,20 @@ include_directories(
         ${FFMPEG_INCLUDE_DIRS}
         ${Boost_INCLUDE_DIRS}  # has to be the last, or we get runtime error on macOS ffmpeg encoder
 )
+
+# Must come after the FFMPEG_INCLUDE_DIRS block above, not before: both this
+# and that block call include_directories(BEFORE ...), and CMake prepends on
+# every BEFORE call, so whichever one runs *last* ends up first (highest
+# priority) in the final search order. The prebuilt FFmpeg archive
+# (${FFMPEG_PREPARED_BINARIES}, see cmake/dependencies/ffmpeg.cmake) bundles
+# its own internal copy of ffnvcodec/nvEncodeAPI.h alongside its public
+# headers -- if that ends up searched first, it silently shadows this
+# project's own third-party/nv-codec-headers submodule for src/nvenc/*.cpp
+# (Sunshine's own standalone NVENC encoder, unrelated to FFmpeg's h264_nvenc)
+# any time the two are pinned to different NVENC SDK versions, producing
+# confusing "struct has no member" compile errors that look like a source
+# bug in nvenc_base.cpp rather than an include-order bug in this file.
+include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/third-party/nv-codec-headers/include")
 
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
         ${MINIUPNP_LIBRARIES}
