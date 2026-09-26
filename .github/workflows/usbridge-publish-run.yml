@@ -1,0 +1,42 @@
+name: usbridge Publish Run Artifacts
+
+# Publishes a release from an already-successful usbridge-release.yml run's
+# artifacts, without rebuilding.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful usbridge-release.yml run id'
+        required: true
+      tag:
+        description: 'Existing release tag (e.g. v2026.927.1.usbridge)'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: "Sunshine ${{ github.event.inputs.tag }} (usbridge fork)"
+          body: |
+            Sunshine fork by usbridge: merged with upstream LizardByte/Sunshine,
+            Linux build with CUDA 12.9 (NVENC CUDA path), `web_bind_address`
+            config option.
+          files: |
+            artifacts/Sunshine-macOS-arm64.dmg
+            artifacts/Sunshine-Windows-x86_64-portable.zip
+            artifacts/Sunshine-Linux-x86_64.tar.gz
+          fail_on_unmatched_files: true
