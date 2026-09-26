@@ -71,7 +71,7 @@ jobs:
           pacman -Scc --noconfirm
 
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Fix workspace permissions
         shell: bash
@@ -148,6 +148,15 @@ jobs:
             _run_unit_tests="${_run_unit_tests}" \
             _support_headless_testing="${_support_headless_testing}" \
             makepkg -si --noconfirm
+
+          # Native packages must install the host rule used by dynamically
+          # created libvirtualhid hidraw and input event nodes.
+          test -f /usr/lib/udev/rules.d/60-sunshine.rules
+          grep -Fq 'IMPORT{parent}="HID_*"' \
+            /usr/lib/udev/rules.d/60-sunshine.rules
+          grep -Fq 'ENV{HID_PHYS}=="libvirtualhid/uhid/*"' \
+            /usr/lib/udev/rules.d/60-sunshine.rules
+          udevadm verify /usr/lib/udev/rules.d/60-sunshine.rules
 
           # Remove debug package
           rm -f sunshine-debug*.pkg.tar.zst

@@ -91,24 +91,11 @@ curl -u user:pass -H "X-CSRF-Token: your_token_here" \
 ## POST /api/reset-display-device-persistence
 @copydoc confighttp::resetDisplayDevicePersistence()
 
+## POST /api/reset-portal-token
+@copydoc confighttp::resetPortalToken()
+
 ## POST /api/restart
 @copydoc confighttp::restart()
 
-## GET /api/vigembus/status
-@copydoc confighttp::getViGEmBusStatus()
-
-## POST /api/vigembus/install
-@copydoc confighttp::installViGEmBus()
-
-<div class="section_buttons">
-
-| Previous                                    |                                  Next |
-|:--------------------------------------------|--------------------------------------:|
-| [Performance Tuning](performance_tuning.md) | [Troubleshooting](troubleshooting.md) |
-
-</div>
-
-<details style="display: none;">
-  <summary></summary>
-  [TOC]
-</details>
+## GET /api/virtual-input/status
+@copydoc confighttp::getVirtualInputStatus()

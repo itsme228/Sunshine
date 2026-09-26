@@ -170,6 +170,25 @@ jobs:
             libminiupnpc-dev libva-dev libvulkan-dev \
             qtbase5-dev libqt5svg5-dev glslang-tools
 
+      # CUDA toolkit (compile-time only: nvcc + headers + static cudart). Without
+      # it SUNSHINE_BUILD_CUDA is never defined and the Linux build silently
+      # loses the CUDA/NVENC zero-copy path ("Attempting to use NVENC without
+      # CUDA support. Reverting back to GPU -> RAM -> GPU"). 12.9 is the newest
+      # 12.x: still builds sm_50+ kernels (13.x drops < sm_75) and supports
+      # gcc-14 as host compiler. Nothing from the toolkit ships in the tarball;
+      # libcuda.so comes from the host's NVIDIA driver at runtime.
+      - name: Install CUDA toolkit
+        env:
+          CUDA_VERSION: "12.9.1"
+          CUDA_BUILD: "575.57.08"
+        run: |
+          url="https://developer.download.nvidia.com/compute/cuda/${CUDA_VERSION}/local_installers/cuda_${CUDA_VERSION}_${CUDA_BUILD}_linux.run"
+          wget -q --max-redirect=0 -O "$RUNNER_TEMP/cuda.run" "$url"
+          sudo sh "$RUNNER_TEMP/cuda.run" --silent --toolkit --toolkitpath="$RUNNER_TEMP/cuda" \
+            --no-opengl-libs --no-man-page --no-drm
+          rm -f "$RUNNER_TEMP/cuda.run"
+          "$RUNNER_TEMP/cuda/bin/nvcc" --version
+
       - name: Configure
         env:
           CC: gcc-14
@@ -179,7 +198,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_DOCS=OFF \
             -DSUNSHINE_BUILD_APPIMAGE=ON \
-            -DCUDA_FAIL_ON_MISSING=OFF \
+            -DSUNSHINE_ENABLE_CUDA=ON \
+            -DCUDA_FAIL_ON_MISSING=ON \
+            -DCMAKE_CUDA_COMPILER:PATH="$RUNNER_TEMP/cuda/bin/nvcc" \
+            -DCMAKE_CUDA_HOST_COMPILER=g++-14 \
             -DSUNSHINE_ENABLE_TRAY=OFF \
             -DSUNSHINE_PUBLISHER_NAME="usbridge_agent" \
             -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/itsme228/usbridge_agent" \
@@ -187,6 +209,12 @@ jobs:
 
       - name: Build
         run: cmake --build build -j $(nproc)
+
+      - name: Verify CUDA support was compiled in
+        run: |
+          grep -q "SUNSHINE_BUILD_CUDA" build/CMakeFiles/sunshine.dir/flags.make
+          find build -name 'cuda.cu.o' | grep -q .
+          echo "CUDA path compiled into sunshine"
 
       - name: Install to staging and package tarball
         run: |
@@ -255,6 +283,9 @@ jobs:
   release:
     name: Create Release
     needs: [build-macos, build-windows, build-linux]
+    # A plain workflow_dispatch on a branch (no tag input) is a CI-only test
+    # build: don't turn the branch name into a release tag.
+    if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write

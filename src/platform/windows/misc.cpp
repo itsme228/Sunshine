@@ -14,8 +14,10 @@
 // lib includes
 #include <boost/algorithm/string.hpp>
 #include <boost/asio/ip/address.hpp>
-#include <boost/process/v1.hpp>
 #include <boost/program_options/parsers.hpp>
+
+// local includes required before platform includes
+#include "src/boost_process_compat.h"
 
 // prevent clang format from "optimizing" the header include order
 // clang-format off
@@ -100,8 +102,7 @@ namespace {
   bool nt_set_timer_resolution_max() {
     ULONG maximum;
     ULONG minimum;
-    if (ULONG current; !NT_SUCCESS(NtQueryTimerResolution(&minimum, &maximum, &current)) ||
-                       !NT_SUCCESS(NtSetTimerResolution(maximum, TRUE, &current))) {
+    if (ULONG current; !NT_SUCCESS(NtQueryTimerResolution(&minimum, &maximum, &current)) || !NT_SUCCESS(NtSetTimerResolution(maximum, TRUE, &current))) {
       return false;
     }
     return true;
@@ -110,8 +111,7 @@ namespace {
   bool nt_set_timer_resolution_min() {
     ULONG maximum;
     ULONG minimum;
-    if (ULONG current; !NT_SUCCESS(NtQueryTimerResolution(&minimum, &maximum, &current)) ||
-                       !NT_SUCCESS(NtSetTimerResolution(minimum, TRUE, &current))) {
+    if (ULONG current; !NT_SUCCESS(NtQueryTimerResolution(&minimum, &maximum, &current)) || !NT_SUCCESS(NtSetTimerResolution(minimum, TRUE, &current))) {
       return false;
     }
     return true;
@@ -1132,8 +1132,8 @@ namespace platf {
     }
   }
 
-  void set_thread_name(const std::string &name) {
-    std::wstring wname = utf_utils::from_utf8(name);
+  void set_thread_name(std::string_view name) {
+    std::wstring wname = utf_utils::from_utf8(std::string {name});
     HRESULT hr = SetThreadDescription(GetCurrentThread(), wname.c_str());
     if (FAILED(hr)) {
       BOOST_LOG(error) << "SetThreadDescription failed: " << hr;

@@ -7,6 +7,8 @@ list(APPEND SUNSHINE_COMPILE_OPTIONS -Wall -Wno-sign-compare)
 # Wno-maybe-uninitialized/Wno-uninitialized - disable warnings for maybe uninitialized variables
 # Wno-sign-compare - disable warnings for signed/unsigned comparisons
 # Wno-restrict - disable warnings for memory overlap
+# Wmissing-field-initializers - enable warnings for missing field initializers
+# Wno-missing-designated-field-initializers - disable warning for missing designated initializers
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # GCC specific compile options
 
@@ -30,6 +32,12 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(Apple)?Clang$")
 
     # Clang doesn't actually complain about this this, so disabling for now
     # list(APPEND SUNSHINE_COMPILE_OPTIONS -Wno-uninitialized)
+
+    # Warn for missing positional field initializers but not designated initializers
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19)
+        list(APPEND SUNSHINE_COMPILE_OPTIONS -Wmissing-field-initializers)
+        list(APPEND SUNSHINE_COMPILE_OPTIONS -Wno-missing-designated-field-initializers)
+    endif()
 
     # Some libc++ versions on Apple and FreeBSD guard std::jthread behind this flag.
     if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
@@ -59,7 +67,67 @@ elseif(UNIX)
     endif()
 endif()
 
-file(GLOB NVENC_SOURCES CONFIGURE_DEPENDS "src/nvenc/*.cpp" "src/nvenc/*.h")
+# libvirtualhid
+add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
+list(APPEND SUNSHINE_EXTERNAL_LIBRARIES libvirtualhid::libvirtualhid)
+list(APPEND PLATFORM_TARGET_FILES
+        "${CMAKE_SOURCE_DIR}/src/platform/virtualhid_input.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/virtualhid_input.cpp")
+
+# build libevdev before the libvirtualhid target when using the ExternalProject fallback
+if(EXTERNAL_PROJECT_LIBEVDEV_USED AND TARGET libvirtualhid)
+    add_dependencies(libvirtualhid libevdev)
+endif()
+
+set(NVENC_PUBLIC_SOURCES
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_config.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_interface.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory.cpp"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory_versions.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_encoded_frame.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_encoder.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_shared_dll.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_version.h"
+)
+set(NVENC_SOURCES ${NVENC_PUBLIC_SOURCES})
+
+if(WIN32)
+    set(NVENC_IMPLEMENTATION_SOURCES
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_base.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_native.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_on_cuda.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory_impl.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_utils.cpp"
+    )
+
+    # Add a version-isolated NVENC implementation object library.
+    # add_nvenc_sdk_implementation: args = `target_name`, `sdk_version`, `sdk_include_dir`
+    function(add_nvenc_sdk_implementation target_name sdk_version sdk_include_dir)
+        add_library(${target_name} OBJECT ${NVENC_IMPLEMENTATION_SOURCES})
+        target_include_directories(${target_name} BEFORE PRIVATE "${sdk_include_dir}")
+        target_compile_definitions(${target_name} PRIVATE
+                NVENC_FACTORY_SUFFIX=${sdk_version}
+                NVENC_NAMESPACE=nvenc_${sdk_version}
+                NVENC_SDK_VERSION=${sdk_version}
+        )
+        target_compile_options(${target_name} PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
+    endfunction()
+
+    add_nvenc_sdk_implementation(nvenc_sdk_1100 1100 "${NV_CODEC_HEADERS_11_INCLUDE_DIR}")
+    add_nvenc_sdk_implementation(nvenc_sdk_1200 1200 "${NV_CODEC_HEADERS_12_INCLUDE_DIR}")
+    add_nvenc_sdk_implementation(nvenc_sdk_1300 1300 "${NV_CODEC_HEADERS_13_INCLUDE_DIR}")
+    add_nvenc_sdk_implementation(nvenc_sdk_1301 1301 "${NV_CODEC_HEADERS_13_1_INCLUDE_DIR}")
+
+    list(APPEND NVENC_SOURCES
+            $<TARGET_OBJECTS:nvenc_sdk_1100>
+            $<TARGET_OBJECTS:nvenc_sdk_1200>
+            $<TARGET_OBJECTS:nvenc_sdk_1300>
+            $<TARGET_OBJECTS:nvenc_sdk_1301>
+    )
+endif()
+
 list(APPEND PLATFORM_TARGET_FILES ${NVENC_SOURCES})
 
 set(SUNSHINE_TARGET_FILES
@@ -151,19 +219,9 @@ include_directories(
         ${Boost_INCLUDE_DIRS}  # has to be the last, or we get runtime error on macOS ffmpeg encoder
 )
 
-# Must come after the FFMPEG_INCLUDE_DIRS block above, not before: both this
-# and that block call include_directories(BEFORE ...), and CMake prepends on
-# every BEFORE call, so whichever one runs *last* ends up first (highest
-# priority) in the final search order. The prebuilt FFmpeg archive
-# (${FFMPEG_PREPARED_BINARIES}, see cmake/dependencies/ffmpeg.cmake) bundles
-# its own internal copy of ffnvcodec/nvEncodeAPI.h alongside its public
-# headers -- if that ends up searched first, it silently shadows this
-# project's own third-party/nv-codec-headers submodule for src/nvenc/*.cpp
-# (Sunshine's own standalone NVENC encoder, unrelated to FFmpeg's h264_nvenc)
-# any time the two are pinned to different NVENC SDK versions, producing
-# confusing "struct has no member" compile errors that look like a source
-# bug in nvenc_base.cpp rather than an include-order bug in this file.
-include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/third-party/nv-codec-headers/include")
+if(NOT APPLE)
+    include_directories(BEFORE SYSTEM "${NV_CODEC_HEADERS_13_1_INCLUDE_DIR}")
+endif()
 
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
         ${MINIUPNP_LIBRARIES}

@@ -34,42 +34,31 @@ else()
     set(CMAKE_C_FLAGS "-fprofile-arcs -ftest-coverage -ggdb -O0")
 endif()
 
-# Find the correct libgcov library path matching the gcc compiler version
-# This ensures the test executable links against the same libgcov version used during compilation
-if(UNIX AND NOT APPLE)
-    # Get the gcc compiler version
+set(SUNSHINE_TEST_GCOV_ROOT
+        ""
+        CACHE PATH "Relocated source and build root used to process gcov data")
+if(SUNSHINE_TEST_GCOV_ROOT AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(
+            "-fprofile-prefix-map=${CMAKE_SOURCE_DIR}=${SUNSHINE_TEST_GCOV_ROOT}")
+endif()
+
+# Link the libgcov that belongs to the selected compiler. Asking GCC directly
+# avoids selecting another installed GCC version through platform-specific
+# library directory names (for example, the GCC required by CUDA on Arch Linux).
+if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
     execute_process(
-        COMMAND ${CMAKE_C_COMPILER} -dumpversion
-        OUTPUT_VARIABLE GCC_VERSION
+        COMMAND ${CMAKE_C_COMPILER} -print-file-name=libgcov.a
+        OUTPUT_VARIABLE LIBGCOV_LIBRARY
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE LIBGCOV_RESULT
     )
 
-    # Extract major version
-    string(REGEX MATCH "^[0-9]+" GCC_MAJOR_VERSION "${GCC_VERSION}")
-
-    # Search for the gcc library directory matching this version
-    file(GLOB GCC_LIB_DIRS "/usr/lib/gcc/*/*${GCC_MAJOR_VERSION}.*")
-
-    if(GCC_LIB_DIRS)
-        list(GET GCC_LIB_DIRS 0 GCC_LIB_DIR)
-        message(STATUS "Found GCC library directory: ${GCC_LIB_DIR}")
-
-        # Look for libgcov.a in the gcc library directory
-        find_library(LIBGCOV_LIBRARY
-            NAMES gcov
-            PATHS ${GCC_LIB_DIR}
-            NO_DEFAULT_PATH
-        )
-
-        if(LIBGCOV_LIBRARY)
-            message(STATUS "Found libgcov: ${LIBGCOV_LIBRARY}")
-            # Store this to link against later
-            set(GCOV_LINK_LIBRARY ${LIBGCOV_LIBRARY})
-        else()
-            message(WARNING "Could not find libgcov in ${GCC_LIB_DIR}")
-        endif()
+    if(LIBGCOV_RESULT EQUAL 0 AND EXISTS "${LIBGCOV_LIBRARY}")
+        message(STATUS "Found libgcov: ${LIBGCOV_LIBRARY}")
+        set(GCOV_LINK_LIBRARY "${LIBGCOV_LIBRARY}")
     else()
-        message(WARNING "Could not find GCC library directory for version ${GCC_VERSION}")
+        message(WARNING "Could not find libgcov for ${CMAKE_C_COMPILER}")
+        unset(GCOV_LINK_LIBRARY)
     endif()
 endif()
 
@@ -88,16 +77,25 @@ elseif (NOT APPLE)
 endif ()
 
 set(TEST_DEFINITIONS)  # list will be appended as needed
+set(SUNSHINE_TEST_SOURCE_DIR
+        "${CMAKE_SOURCE_DIR}"
+        CACHE PATH "Source fixture directory used by tests")
+set(SUNSHINE_TEST_RUNTIME_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        CACHE PATH "Writable runtime fixture directory used by tests")
 
 # this indicates we're building tests in case sunshine needs to adjust some code or add private tests
 list(APPEND TEST_DEFINITIONS SUNSHINE_TESTS)
-list(APPEND TEST_DEFINITIONS SUNSHINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-list(APPEND TEST_DEFINITIONS SUNSHINE_TEST_BIN_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+list(APPEND TEST_DEFINITIONS SUNSHINE_SOURCE_DIR="${SUNSHINE_TEST_SOURCE_DIR}")
+list(APPEND TEST_DEFINITIONS SUNSHINE_TEST_BIN_DIR="${SUNSHINE_TEST_RUNTIME_DIR}")
+if(SUNSHINE_ENABLE_TRAY)
+    list(APPEND TEST_DEFINITIONS TRAY_ENABLE_TEST_HOOKS)
+endif()
 
 # Override SUNSHINE_ASSETS_DIR to use a writable temp directory for tests
 # Remove the existing definition from SUNSHINE_DEFINITIONS to avoid redefinition error
 list(FILTER SUNSHINE_DEFINITIONS EXCLUDE REGEX "^SUNSHINE_ASSETS_DIR=")
-list(APPEND TEST_DEFINITIONS SUNSHINE_ASSETS_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_assets")
+list(APPEND TEST_DEFINITIONS SUNSHINE_ASSETS_DIR="${SUNSHINE_TEST_RUNTIME_DIR}/test_assets")
 
 if(NOT WIN32)
     find_package(Udev 255)  # we need 255+ for udevadm verify
@@ -110,6 +108,65 @@ endif()
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_SOURCE_DIR}/tests/*.h
         ${CMAKE_SOURCE_DIR}/tests/*.cpp)
+if(SUNSHINE_ENABLE_TRAY AND (WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    set(SUNSHINE_TRAY_TEST_ICON_SOURCE_DIR
+            "${CMAKE_SOURCE_DIR}/src_assets/common/assets/web/public/images")
+    set(SUNSHINE_TRAY_TEST_ICON_DESTINATION_DIR
+            "${CMAKE_CURRENT_BINARY_DIR}/test_assets/web/images")
+    file(MAKE_DIRECTORY "${SUNSHINE_TRAY_TEST_ICON_DESTINATION_DIR}")
+
+    configure_file(
+            "${CMAKE_SOURCE_DIR}/sunshine.svg"
+            "${SUNSHINE_TRAY_TEST_ICON_DESTINATION_DIR}/logo-sunshine.svg"
+            COPYONLY)
+
+    if(WIN32)
+        configure_file(
+                "${CMAKE_SOURCE_DIR}/third-party/libvirtualhid/libvirtualhid.svg"
+                "${SUNSHINE_TRAY_TEST_ICON_DESTINATION_DIR}/logo-libvirtualhid.svg"
+                COPYONLY)
+    endif()
+
+    set(SUNSHINE_TRAY_TEST_ICONS
+            sunshine-locked.svg
+            sunshine-playing.svg
+            sunshine-pausing.svg)
+
+    foreach(icon IN LISTS SUNSHINE_TRAY_TEST_ICONS)
+        configure_file(
+                "${SUNSHINE_TRAY_TEST_ICON_SOURCE_DIR}/${icon}"
+                "${SUNSHINE_TRAY_TEST_ICON_DESTINATION_DIR}/${icon}"
+                COPYONLY)
+    endforeach()
+
+    add_library(sunshine_tray_test_helpers STATIC
+            ${CMAKE_SOURCE_DIR}/third-party/tray/tests/notification_utils.cpp
+            ${CMAKE_SOURCE_DIR}/third-party/tray/tests/screenshot_utils.cpp)
+    set_target_properties(sunshine_tray_test_helpers PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON)
+    target_include_directories(sunshine_tray_test_helpers PRIVATE
+            ${CMAKE_SOURCE_DIR}/third-party/tray)
+    target_link_libraries(sunshine_tray_test_helpers PRIVATE
+            lizardbyte::common)
+
+    if(WIN32)
+        target_link_libraries(sunshine_tray_test_helpers PRIVATE
+                gdi32
+                gdiplus)
+    else()
+        find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Gui)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Gui)
+        set(SUNSHINE_TRAY_TEST_QT_GUI_TARGET Qt${QT_VERSION_MAJOR}::Gui)
+
+        target_link_libraries(sunshine_tray_test_helpers PRIVATE
+                ${SUNSHINE_TRAY_TEST_QT_GUI_TARGET})
+        if(APPLE)
+            target_link_libraries(sunshine_tray_test_helpers PRIVATE
+                    "-framework Cocoa")
+        endif()
+    endif()
+endif()
 # Add macOS-specific test files only when building tests for macOS
 if (APPLE)
     file(GLOB_RECURSE MACOS_TEST_SOURCES CONFIGURE_DEPENDS
@@ -131,13 +188,41 @@ add_executable(${PROJECT_NAME}
 # This ensures both CLI and CLion can access the same files relative to the test executable
 # Using configure_file ensures files are copied when they change between builds
 set(INTEGRATION_TEST_FILES
+    "cmake/compile_definitions/macos.cmake"
+    "cmake/dependencies/Boost_Sunshine.cmake"
+    "cmake/macros/common.cmake"
+    "cmake/prep/options.cmake"
+    "package-lock.cmake"
+    "packaging/linux/Arch/PKGBUILD"
+    "packaging/linux/flatpak/modules/boost.json"
+    "scripts/linux_build.sh"
     "src/config.cpp"
-    "src_assets/common/assets/web/config.html"
+    "src_assets/common/assets/web/Config.vue"
+    "src_assets/common/assets/web/locale.js"
+    "docs/building.md"
     "docs/configuration.md"
+    "docs/getting_started.md"
+    "docs/troubleshooting.md"
     "src_assets/common/assets/web/public/assets/locale/en.json"
+    "src_assets/common/assets/web/configs/config_tabs.json"
+    "src_assets/common/assets/web/configs/VirtualKeyCodeSelect.vue"
+    "src_assets/common/assets/web/configs/virtual_key_codes.js"
     "src_assets/common/assets/web/configs/tabs/General.vue"
+    "src_assets/common/assets/web/configs/tabs/Inputs.vue"
     "src_assets/linux/misc/60-sunshine.rules"
 )
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/packaging/linux/copr/Sunshine.spec")
+    list(APPEND INTEGRATION_TEST_FILES "packaging/linux/copr/Sunshine.spec")
+    list(APPEND TEST_DEFINITIONS SUNSHINE_COPR_SPEC_FIXTURE_AVAILABLE)
+endif()
+
+if(APPLE)
+    list(APPEND INTEGRATION_TEST_FILES
+        ".github/workflows/ci-macos.yml"
+        "scripts/macos_build.sh"
+    )
+endif()
 
 foreach(file ${INTEGRATION_TEST_FILES})
     configure_file(
@@ -172,6 +257,15 @@ set(TEST_LINK_LIBRARIES
     lizardbyte::test_support
     ${PLATFORM_LIBRARIES}
 )
+
+if(SUNSHINE_ENABLE_TRAY AND (WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    list(APPEND TEST_LINK_LIBRARIES
+            sunshine_tray_test_helpers)
+    if(SUNSHINE_TRAY_TEST_QT_GUI_TARGET)
+        list(APPEND TEST_LINK_LIBRARIES
+                ${SUNSHINE_TRAY_TEST_QT_GUI_TARGET})
+    endif()
+endif()
 
 # Add the specific libgcov library if found
 if(GCOV_LINK_LIBRARY)

@@ -13,6 +13,7 @@
 #endif
 
 // standard includes
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <fstream>
@@ -44,7 +45,6 @@
 // lib includes
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/host_name.hpp>
-#include <boost/process/v1.hpp>
 #include <fcntl.h>
 #include <lizardbyte/common/env.h>
 #include <unistd.h>
@@ -58,8 +58,10 @@
 // local includes
 #include "graphics.h"
 #include "misc.h"
+#include "src/boost_process_compat.h"
 #include "src/config.h"
 #include "src/entry_handler.h"
+#include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "vaapi.h"
@@ -151,6 +153,33 @@ namespace dyn {
 }  // namespace dyn
 
 namespace platf {
+  namespace {
+    constexpr std::array privileged_gui_environment_variables {
+      "GDK_PIXBUF_MODULEDIR",
+      "GDK_PIXBUF_MODULE_FILE",
+      "GIO_EXTRA_MODULES",
+      "GTK3_MODULES",
+      "GTK_EXE_PREFIX",
+      "GTK_IM_MODULE_FILE",
+      "GTK_MODULES",
+      "GTK_PATH",
+      "QML2_IMPORT_PATH",
+      "QML_IMPORT_PATH",
+      "QT_PLUGIN_PATH",
+      "QT_QPA_PLATFORM_PLUGIN_PATH",
+    };
+
+  }  // namespace
+
+  bool sanitize_process_environment() {
+    for (const auto *variable : privileged_gui_environment_variables) {
+      if (unsetenv(variable) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /**
    * @brief Owning pointer for `getifaddrs` results.
    */
@@ -521,8 +550,10 @@ namespace platf {
     }
   }
 
-  void set_thread_name(const std::string &name) {
-    pthread_setname_np(pthread_self(), name.c_str());
+  void set_thread_name(std::string_view name) {
+    // Truncate name to fit in Linux/FreeBSD kernel's 16 byte limit
+    std::string tr_name {name.substr(0, 15)};
+    pthread_setname_np(pthread_self(), tr_name.c_str());
   }
 
   /**
@@ -1184,22 +1215,81 @@ namespace platf {
 #endif
 
 #ifdef SUNSHINE_BUILD_PORTAL
-  std::vector<std::string> portal_display_names();
+  std::vector<std::string> portal_display_names(bool allow_start_timeout);
   std::shared_ptr<display_t> portal_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
 
+  /**
+   * @brief Enumerates possible Portal probe responses.
+   */
+  enum class portal_probe_e {
+    unreachable,  ///< Portal service is unreachable.
+    no_token,  ///< Token not found.
+    stale_token,  ///< Had a token, but it didn't produce a working session.
+    available  ///< Portal is available.
+  };
+
+  /**
+   * @brief Probe Portal availability via token existence, DBus availability and timed probe.
+   *
+   * @return Can return no_token, unreachable, stale_token or available for processing via verify_portal().
+   */
+  portal_probe_e probe_portal() {
+    using enum portal_probe_e;
+
+    if (!portal::is_portal_service_reachable()) {
+      return unreachable;
+    }
+    if (!portal::has_saved_token()) {
+      return no_token;
+    }
+    return portal_display_names(true).empty() ? stale_token : available;
+  }
+
+  /**
+   * @brief Verify Portal capture and/or begin token negotiation via TaskPool.
+   *        If negotiation is requested, either queue a TaskPool task if no restore token is detected,
+   *        or if a stale token is detected, delete it and restart Sunshine.
+   *
+   * @return True if Portal is available.
+   */
   bool verify_portal() {
-    return !portal_display_names().empty();
+    using enum portal_probe_e;
+
+    auto result = probe_portal();
+    switch (result) {
+      case available:
+        return true;
+      case unreachable:
+        BOOST_LOG(debug) << "[portalgrab] xdg-desktop-portal not reachable; skipping Portal capture."sv;
+        return false;
+      case stale_token:
+        BOOST_LOG(warning) << "[portalgrab] Saved portal token did not produce a session; discarding and restarting."sv;
+        portal::clear_saved_token();
+        platf::restart();
+        return false;
+      case no_token:
+        BOOST_LOG(fatal) << "Portal capture is awaiting user permission. "sv
+                         << "The current session will attempt to use a fallback capture method."sv;
+        task_pool.push([]() {
+          if (!portal_display_names(false).empty()) {
+            platf::restart();
+          } else {
+            BOOST_LOG(error) << "[portalgrab] Portal session token was not negotiated."sv;
+          }
+        });
+        return false;
+      default:
+        return false;
+    }
   }
 #endif
 
 #ifdef SUNSHINE_BUILD_KWIN
-  bool kwin_available();
   std::vector<std::string> kwin_display_names();
   std::shared_ptr<display_t> kwin_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
 
   bool verify_kwin() {
-    // Note: The separate kwin_available check is necessary because with CAP_SYS_ADMIN kwin_display_names is never empty during startup
-    return window_system == window_system_e::WAYLAND && kwin_available() && !kwin_display_names().empty();
+    return !kwin_display_names().empty();
   }
 #endif
 
@@ -1230,7 +1320,7 @@ namespace platf {
 #endif
 #ifdef SUNSHINE_BUILD_PORTAL
     if (sources[source::PORTAL]) {
-      return portal_display_names();
+      return portal_display_names(true);
     }
 #endif
 #ifdef SUNSHINE_BUILD_KWIN
@@ -1260,7 +1350,9 @@ namespace platf {
   }
 
   std::shared_ptr<display_t> display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config) {
-    // Keep KMS as first element to check before dropping CAP_SYS_ADMIN
+    // Please ensure that KMS followed by CUDA remains at the top so that we can
+    // drop DRM worker privileges once neither backend requires it.
+
 #ifdef SUNSHINE_BUILD_DRM
     if (sources[source::KMS]) {
       BOOST_LOG(info) << "Screencasting with KMS"sv;
@@ -1268,17 +1360,18 @@ namespace platf {
     }
 #endif
 
-    // KMS capture was passed; drop CAP_SYS_ADMIN only.
-    if (has_elevated_privileges(false)) {
-      drop_elevated_privileges(false);
-    }
-
 #ifdef SUNSHINE_BUILD_CUDA
     if (sources[source::NVFBC] && hwdevice_type == mem_type_e::cuda) {
       BOOST_LOG(info) << "Screencasting with NvFBC"sv;
       return nvfbc_display(hwdevice_type, display_name, config);
     }
 #endif
+
+#ifdef SUNSHINE_BUILD_DRM
+    // Drop all DRM worker thread privileges if not needed for this process's lifetime.
+    platf::kms::drop_drm_worker_privileges();
+#endif
+
 #ifdef SUNSHINE_BUILD_WAYLAND
     if (sources[source::WAYLAND]) {
       BOOST_LOG(info) << "Screencasting with Wayland's protocol"sv;
@@ -1339,36 +1432,50 @@ namespace platf {
     }
 #endif
 
+    // Avoid mutating config directly if Portal needs to run in fallback capture mode.
+    std::string selected_capture = config::video.capture;
+
+    // When Portal is explicitly selected, probe it first so other capture methods can be considered for fallback capture.
+#ifdef SUNSHINE_BUILD_PORTAL
+    bool portal_available = false;
+    if (selected_capture == "portal") {
+      portal_available = verify_portal();
+      if (!portal_available) {
+        // Continue probing for fallback capture methods.
+        selected_capture.clear();
+      }
+    }
+#endif
 #ifdef SUNSHINE_BUILD_CUDA
-    if (((config::video.capture.empty() && sources.none()) || config::video.capture == "nvfbc") && verify_nvfbc()) {
+    if (((selected_capture.empty() && sources.none()) || selected_capture == "nvfbc") && verify_nvfbc()) {
       sources[source::NVFBC] = true;
     }
 #endif
 #ifdef SUNSHINE_BUILD_WAYLAND
-    if (((config::video.capture.empty() && sources.none()) || config::video.capture == "wlr") && verify_wl()) {
+    if (((selected_capture.empty() && sources.none()) || selected_capture == "wlr") && verify_wl()) {
       sources[source::WAYLAND] = true;
     }
 #endif
 #ifdef SUNSHINE_BUILD_DRM
-    if (((config::video.capture.empty() && sources.none()) || config::video.capture == "kms") && verify_kms()) {
+    if (((selected_capture.empty() && sources.none()) || selected_capture == "kms") && verify_kms()) {
       sources[source::KMS] = true;
     }
 #endif
 #ifdef SUNSHINE_BUILD_X11
     // We enumerate this capture backend regardless of other suitable sources,
     // since it may be needed as a NvFBC fallback for software encoding on X11.
-    if ((config::video.capture.empty() || config::video.capture == "x11") && verify_x11()) {
+    if ((selected_capture.empty() || selected_capture == "x11") && verify_x11()) {
       sources[source::X11] = true;
     }
 #endif
-#ifdef SUNSHINE_BUILD_PORTAL
-    if ((config::video.capture.empty() || config::video.capture == "portal") && verify_portal()) {
-      sources[source::PORTAL] = true;
+#ifdef SUNSHINE_BUILD_KWIN
+    if (((selected_capture.empty() && sources.none()) || selected_capture == "kwin") && verify_kwin()) {
+      sources[source::KWIN] = true;
     }
 #endif
-#ifdef SUNSHINE_BUILD_KWIN
-    if (((config::video.capture.empty() && sources.none()) || config::video.capture == "kwin") && verify_kwin()) {
-      sources[source::KWIN] = true;
+#ifdef SUNSHINE_BUILD_PORTAL
+    if (portal_available || (config::video.capture.empty() && sources.none() && verify_portal())) {
+      sources[source::PORTAL] = true;
     }
 #endif
 

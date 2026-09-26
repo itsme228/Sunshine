@@ -482,6 +482,7 @@ namespace rtsp_stream {
      * @return Network operation status.
      */
     int bind(net::af_e af, std::uint16_t port, boost::system::error_code &ec) {
+      af = net::get_effective_address_family(af);
       acceptor.open(af == net::IPV4 ? tcp::v4() : tcp::v6(), ec);
       if (ec) {
         return -1;
@@ -758,6 +759,7 @@ namespace rtsp_stream {
 
   void terminate_sessions() {
     server.clear(true);
+    input::terminate_gamepads();
   }
 
   /**
@@ -765,6 +767,7 @@ namespace rtsp_stream {
    */
   void terminate_sessions_by_cert(std::string_view cert) {
     server.clear_by_cert(cert);
+    input::terminate_gamepads(cert);
   }
 
   /**
@@ -1289,8 +1292,7 @@ namespace rtsp_stream {
 
     // Check that any required encryption is enabled
     auto encryption_mode = net::encryption_mode_for_address(sock.remote_endpoint().address());
-    if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY &&
-        (config.encryptionFlagsEnabled & (SS_ENC_VIDEO | SS_ENC_AUDIO)) != (SS_ENC_VIDEO | SS_ENC_AUDIO)) {
+    if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY && (config.encryptionFlagsEnabled & (SS_ENC_VIDEO | SS_ENC_AUDIO)) != (SS_ENC_VIDEO | SS_ENC_AUDIO)) {
       BOOST_LOG(error) << "Rejecting client that cannot comply with mandatory encryption requirement"sv;
 
       respond(sock, session, &option, 403, "Forbidden", req->sequenceNumber, {});
