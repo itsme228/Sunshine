@@ -482,6 +482,17 @@ namespace nvhttp {
     std::copy(rikey.cbegin(), rikey.cend(), std::back_inserter(launch_session->gcm_key));
 
     launch_session->host_audio = host_audio;
+
+    // usbridge: the client's "Show Mouse" setting, sent on every /launch and
+    // /resume so a session starts with the cursor exactly as the user chose
+    // (display_cursor is otherwise process-global and only ever flipped by
+    // Ctrl+Alt+Shift+N, so a new session could inherit the last one's state).
+    // Absent from stock Moonlight clients: left unchanged then.
+    if (const auto cursor = get_arg(args, "usbridgeDisplayCursor", ""); !cursor.empty()) {
+      display_cursor = cursor == "1" || cursor == "true";
+      BOOST_LOG(info) << "Client set display cursor: "sv << (display_cursor ? "shown"sv : "hidden"sv);
+    }
+
     std::stringstream mode = std::stringstream(get_arg(args, "mode", "0x0x0"));
     // Split mode by the char "x", to populate width/height/fps
     int x = 0;
