@@ -68,6 +68,12 @@ namespace platf {
 
     capture_e capture(const push_captured_image_cb_t &push_captured_image_cb, const pull_free_image_cb_t &pull_free_image_cb, bool *cursor) override {
       auto signal = [av_capture capture:^(CMSampleBufferRef sampleBuffer) {
+        // Captured here, as close to the callback firing as possible, so it
+        // matches what x11grab.cpp/display_ram.cpp/display_wgc.cpp use to
+        // populate frame_timestamp -- without it, stream.cpp's
+        // frame_processing_latency (Moonlight's "host" stat) stays 0 for
+        // every frame, since it is only computed when frame_timestamp is set.
+        auto frame_timestamp = std::chrono::steady_clock::now();
         auto new_sample_buffer = std::make_shared<av_sample_buf_t>(sampleBuffer);
         auto new_pixel_buffer = std::make_shared<av_pixel_buf_t>(new_sample_buffer->buf);
 
@@ -93,6 +99,7 @@ namespace platf {
         img_out->height = (int) CVPixelBufferGetHeight(new_pixel_buffer->buf);
         img_out->row_pitch = (int) CVPixelBufferGetBytesPerRow(new_pixel_buffer->buf);
         img_out->pixel_pitch = img_out->row_pitch / img_out->width;
+        img_out->frame_timestamp = frame_timestamp;
 
         old_data_retainer = nullptr;
 
