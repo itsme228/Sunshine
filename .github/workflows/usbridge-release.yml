@@ -199,6 +199,7 @@ jobs:
             -DBUILD_DOCS=OFF \
             -DSUNSHINE_BUILD_APPIMAGE=ON \
             -DSUNSHINE_ENABLE_CUDA=ON \
+            -DSUNSHINE_ENABLE_VULKAN=OFF \
             -DCUDA_FAIL_ON_MISSING=ON \
             -DCMAKE_CUDA_COMPILER:PATH="$RUNNER_TEMP/cuda/bin/nvcc" \
             -DCMAKE_CUDA_HOST_COMPILER=g++-14 \
@@ -215,6 +216,13 @@ jobs:
           grep -q "SUNSHINE_BUILD_CUDA" build/CMakeFiles/sunshine.dir/flags.make
           find build -name 'cuda.cu.o' | grep -q .
           echo "CUDA path compiled into sunshine"
+
+      - name: Verify Vulkan encoder was left out
+        run: |
+          if grep -q "SUNSHINE_BUILD_VULKAN" build/CMakeFiles/sunshine.dir/flags.make; then
+            echo "::error::Vulkan encoder must not be built (it segfaults on stream start)"
+            exit 1
+          fi
 
       - name: Install to staging and package tarball
         run: |

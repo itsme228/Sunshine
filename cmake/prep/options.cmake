@@ -62,8 +62,11 @@ elseif(UNIX)  # Linux
             "Enable KMS grab if available." ON)
     option(SUNSHINE_ENABLE_VAAPI
             "Enable building vaapi specific code." ON)
+    # usbridge: OFF -- the Vulkan encoder segfaults as soon as a client starts
+    # a stream (seen with KMS capture on NVIDIA, where the probe falls back to
+    # it once NVENC can't find the monitor), so it is not built at all.
     option(SUNSHINE_ENABLE_VULKAN
-            "Enable Vulkan video encoding." ON)
+            "Enable Vulkan video encoding." OFF)
     option(SUNSHINE_ENABLE_WAYLAND
             "Enable building wayland specific code." ON)
     option(SUNSHINE_ENABLE_X11
