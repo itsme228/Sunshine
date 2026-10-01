@@ -173,6 +173,14 @@ namespace confighttp {
    */
   nlohmann::json get_vigembus_driver_status();
 
+  /**
+   * @brief Report whether a Moonlight client currently has an active streaming session.
+   *
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   */
+  void getSessionStatus(const resp_https_t &response, const req_https_t &request);
+
   void getVirtualInputStatus(const resp_https_t &response, const req_https_t &request);
 
   void getVirtualInputLicense(const resp_https_t &response, const req_https_t &request);

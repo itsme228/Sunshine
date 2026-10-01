@@ -2049,6 +2049,32 @@ namespace confighttp {
   }
 
   /**
+   * @brief Report whether a Moonlight client currently has an active streaming session.
+   *
+   * Reads rtsp_stream::session_count() directly -- the same live count nvhttp.cpp
+   * itself checks before accepting a new /launch -- rather than making a caller
+   * infer session state by grepping this process's log for "CLIENT CONNECTED"/
+   * "CLIENT DISCONNECTED" lines, which ties that caller to this exact log wording
+   * and breaks the instant it's reworded upstream.
+   *
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/session-status|:| GET|:| null}
+   */
+  void getSessionStatus(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    nlohmann::json output_tree;
+    output_tree["session_active"] = rtsp_stream::session_count() > 0;
+    send_response(response, output_tree);
+  }
+
+  /**
    * @brief Get the current libvirtualhid machine license status.
    *
    * @param response HTTP response object.
@@ -2371,6 +2397,7 @@ namespace confighttp {
     server.resource["^/api/reset-display-device-persistence$"]["POST"] = resetDisplayDevicePersistence;
     server.resource["^/api/reset-portal-token$"]["POST"] = resetPortalToken;
     server.resource["^/api/restart$"]["POST"] = restart;
+    server.resource["^/api/session-status$"]["GET"] = getSessionStatus;
     server.resource["^/api/virtual-input/license$"]["GET"] = getVirtualInputLicense;
     server.resource["^/api/virtual-input/license$"]["POST"] = updateVirtualInputLicense;
     server.resource["^/api/virtual-input/status$"]["GET"] = getVirtualInputStatus;
